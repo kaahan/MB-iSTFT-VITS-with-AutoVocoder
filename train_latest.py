@@ -13,6 +13,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.cuda.amp import autocast, GradScaler
 from pqmf import PQMF
+import wandb
 
 import commons
 import utils
@@ -61,6 +62,8 @@ def run(rank, n_gpus, hps):
     utils.check_git_hash(hps.model_dir)
     writer = SummaryWriter(log_dir=hps.model_dir)
     writer_eval = SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval"))
+
+    wandb.init(project="mb-istft-vits-autovocoder", config=hps)
 
   dist.init_process_group(backend='nccl', init_method='env://', world_size=n_gpus, rank=rank)
   torch.manual_seed(hps.train.seed)
@@ -253,6 +256,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
           global_step=global_step, 
           images=image_dict,
           scalars=scalar_dict)
+        
+        wandb.log({"train/" + k: v for k, v in scalar_dict.items()}, step=global_step)
+        wandb.log({"train/" + k: wandb.Image(v) for k, v in image_dict.items()}, step=global_step)
 
       if global_step % hps.train.eval_interval == 0:
         evaluate(hps, net_g, eval_loader, writer_eval)
@@ -317,6 +323,10 @@ def evaluate(hps, generator, eval_loader, writer_eval):
       audios=audio_dict,
       audio_sampling_rate=hps.data.sampling_rate
     )
+        
+    wandb.log({"eval/" + k: wandb.Image(v) for k, v in image_dict.items()}, step=global_step)
+    wandb.log({"eval/" + k: wandb.Audio(v.detach().cpu().numpy().squeeze(), sample_rate=hps.data.sampling_rate) for k, v in audio_dict.items()}, step=global_step)
+
     generator.train()
 
                            
